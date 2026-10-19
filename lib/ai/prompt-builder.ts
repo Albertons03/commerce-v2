@@ -158,7 +158,7 @@ function buildSystemPrompt(
 
 **Primary Functions:**
 - Help customers discover relevant products based on their needs
-- Provide detailed product information and comparisons  
+- Provide detailed product information and comparisons
 - Answer questions about features, pricing, and availability
 - Guide users through product selection and decision-making
 - Identify potential leads and capture contact information when appropriate
