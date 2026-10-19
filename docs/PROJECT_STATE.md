@@ -17,6 +17,21 @@ than copied wholesale.
 The existing Supabase project will be reused. No database changes have been
 made.
 
+## AI Core Migration
+
+- COM-003A: AI Core Migration completed. Migrated `openai-client.ts`,
+  `embedding-service.ts`, `chat-service.ts`, and `prompt-builder.ts`.
+- COM-003B: Lazy OpenAI client initialization completed. The OpenAI client is
+  protected by a `server-only` boundary, and credentials are validated only
+  when the client is requested.
+- The `ProductMatch` type dependency was isolated in the prompt builder; the
+  RAG service and Supabase code were not migrated.
+- Created `docs/architecture/AI_CORE.md`.
+- All 3 focused AI Core tests passed. ESLint, TypeScript, and production build
+  passed.
+- No real OpenAI calls or Supabase operations were performed.
+- `npm audit` reported 5 unresolved high-severity findings.
+
 ## Next Planned Task
 
-Perform the controlled AI module migration.
+COM-004: Product Ingestion.
