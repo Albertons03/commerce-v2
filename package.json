@@ -7,14 +7,16 @@
     "build": "next build",
     "start": "next start",
     "lint": "eslint",
-    "test:ai-core": "node --test tests/ai/openai-client.test.mjs"
+    "test:ai-core": "node --test tests/ai/openai-client.test.mjs",
+    "test:product-ingestion": "node --test tests/validations/product-ingestion.test.mjs"
   },
   "dependencies": {
     "next": "16.4.2",
     "openai": "^4.104.0",
     "react": "19.3.0",
     "react-dom": "19.3.0",
-    "server-only": "^0.0.1"
+    "server-only": "^0.0.1",
+    "zod": "^3.25.76"
   },
   "devDependencies": {
     "@tailwindcss/turbopack": "^4",
