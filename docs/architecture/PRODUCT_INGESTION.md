@@ -53,6 +53,8 @@ sequenceDiagram
 
 - `lib/validations/product-ingestion.ts` — termék- és kötegkérési sémák, valamint az azokból származó `ProductInput` és `ProductIngestionRequest` típusok.
 - `tests/validations/product-ingestion.test.mjs` — Node beépített tesztfuttatójával ellenőrzi az érvényes és hibás bemeneteket, a korlátokat és az alapértékeket.
+- `lib/products/product-embedding-mapper.ts` — validált termék- és embeddingadatból adatbázis-oszlopokat követő sort készít, de nem persistál.
+- `tests/products/product-embedding-mapper.test.mjs` — a leképezést, a vektor és szervezet UUID ellenőrzését, valamint a DB-defaultokat teszteli.
 - `lib/supabase/server.ts` — lusta, cookie-alapú, szerveroldali user-scoped Supabase-kliens.
 - `lib/supabase/organization-authorization.ts` — tagság- és szerepkörellenőrzés explicit eredmény-unióval; csak `owner` és `admin` engedélyezett.
 - `tests/supabase/organization-authorization.test.mjs` — mockolt Supabase-lekérdezésekkel ellenőrzi az engedélyezett és tiltott eseteket.
@@ -89,6 +91,23 @@ Az endpoint `POST /api/products/ingest`. A request body `userId` vagy `organizat
 - `503`: a hitelesítés nem érhető el, hiányzik/hibás a demo-szervezet konfigurációja, vagy hibázott a jogosultság-lekérdezés. Az adatbázishiba részletei nem kerülnek vissza.
 
 A route csak a sikeres jogosultság-ellenőrzés után olvassa be a request JSON-t. A `200` válasz nem jelenti az adatok tartósítását.
+
+## Product embedding mapper
+
+A `lib/products/product-embedding-mapper.ts` tiszta leképezőfüggvénye a szerver által már engedélyezett szervezet UUID-ját, egy validált `ProductInput` értéket, az embedding vektort, a modellazonosítót és az opcionális token-számot alakítja adatbázis-beszúráshoz használható `ProductEmbeddingRow` objektummá. Az `organization_id` külön paraméter, nem származik termékadatból vagy metadata-ból; a mapper UUID-formátumot ellenőriz, de jogosultságot nem.
+
+A termék mezői az adatbázis oszlopneveire képződnek le. A nem megadott kategória, ár és URL mezők SQL `NULL`-ként szerepelnek. A hiányzó pénznem és metadata nincs hozzáadva a beszúrási objektumhoz, így a tábla alapértékei (`USD`, illetve `{}`) érvényesülhetnek. A hiányzó token-szám `NULL`. A vektornak pontosan 1536 véges számot kell tartalmaznia. Az `id`, `created_at`, `updated_at` és `is_active` mezőket a mapper nem állítja elő, ezeket az adatbázis alapértékeire bízza.
+
+```mermaid
+flowchart LR
+  Product["Validált ProductInput"] --> Mapper["mapProductToEmbeddingRow"]
+  AuthorizedOrg["Szerver által engedélyezett org UUID"] --> Mapper
+  Embedding["Embedding vektor + modell + tokenek"] --> Mapper
+  Mapper --> Row["ProductEmbeddingRow adatbázis-oszlopokkal"]
+  Row -. "külön későbbi művelet" .-> DB["product_embeddings beszúrás"]
+```
+
+A mapper csak adatot alakít át és ellenőriz; **nem persistál**, nem hív Supabase-t vagy OpenAI-t. Az adatbázis séma és a `VECTOR(1536)` méret a megadott szerződésből származik, élő adatbázison nem lett ellenőrizve.
 
 ## Ellenőrzött szabályok
 

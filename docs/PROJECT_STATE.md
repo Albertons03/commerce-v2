@@ -44,6 +44,17 @@ made.
   Product validation tests: 8 passed. AI Core tests: 3 passed. ESLint,
   TypeScript, and production build passed.
 
+## Product Embedding Persistence Contract
+
+- COM-005B/3: Authorized validation-only ingestion API, base commit
+  `552b305`.
+- COM-005C/1: Pure `ProductInput` and embedding-to-row mapper implemented.
+  Mapper tests: 8 passed. Existing product-ingestion, authorization, API-route,
+  and AI Core tests: 29 passed. ESLint, TypeScript, production build, and
+  `git diff --check` passed. No Supabase or OpenAI calls and no database writes.
+- Updated ingestion architecture documentation. The database contract,
+  including `VECTOR(1536)`, remains unverified against the live database.
+
 ## Next Planned Task
 
-COM-005C.
+COM-005C/2.
