@@ -9,7 +9,8 @@
     "lint": "eslint",
     "test:ai-core": "node --test tests/ai/openai-client.test.mjs",
     "test:product-ingestion": "node --test tests/validations/product-ingestion.test.mjs",
-    "test:organization-authorization": "node --test tests/supabase/organization-authorization.test.mjs"
+    "test:organization-authorization": "node --test tests/supabase/organization-authorization.test.mjs",
+    "test:products-ingest": "node --test tests/api/products-ingest.test.mjs"
   },
   "dependencies": {
     "@supabase/ssr": "^0.12.7",

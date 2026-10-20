@@ -32,6 +32,18 @@ made.
 - No real OpenAI calls or Supabase operations were performed.
 - `npm audit` reported 5 unresolved high-severity findings.
 
+## Product Ingestion Foundation
+
+- COM-005B/2: Authentication and organization authorization foundation,
+  commit `147fd9d`.
+- COM-005B/3: Validation-only product ingestion API implemented. The route
+  authenticates the cookie-based user, resolves the demo organization
+  server-side, authorizes `owner`/`admin`, and then validates the request. It
+  does not generate embeddings or write to the database.
+- API route tests: 11 passed. Organization authorization tests: 7 passed.
+  Product validation tests: 8 passed. AI Core tests: 3 passed. ESLint,
+  TypeScript, and production build passed.
+
 ## Next Planned Task
 
-COM-004: Product Ingestion.
+COM-005C.

@@ -4,7 +4,7 @@
 
 A `lib/validations/product-ingestion.ts` Zod-sémái ellenőrzik a termékadatok és a kötegkérés alakját. Sikeres validáláskor Zod által következtetett TypeScript-típusok állnak rendelkezésre. A séma nem tartalmaz `organization_id` mezőt.
 
-Ez a réteg **adatvalidálás**, nem jogosultság-ellenőrzés: megállapítja, hogy a bemenet megfelel-e a várt formátumnak, de nem azonosítja a felhasználót, és nem ellenőrzi, hogy hozzáfér-e egy szervezethez. A szerveroldali auth- és authorization-helperek elkészültek; a későbbi API-route feladata lesz ezek meghívása a termékadat validálása előtt.
+Ez a réteg **adatvalidálás**, nem jogosultság-ellenőrzés: megállapítja, hogy a bemenet megfelel-e a várt formátumnak, de nem azonosítja a felhasználót, és nem ellenőrzi, hogy hozzáfér-e egy szervezethez. Az ingestion route előbb hitelesít és jogosultságot ellenőriz, és csak ezután validálja a termékadatokat.
 
 ## Szerveroldali hitelesítés és szervezeti jogosultság
 
@@ -16,30 +16,37 @@ A `lib/supabase/organization-authorization.ts` `authorizeOrganizationIngestion(u
 
 A user-scoped kliens a publikus publishable/anon kulcsot és a kérés cookie-jait használja. A lekérdezés a bejelentkezett felhasználó jogosultságaival, az RLS hatálya alatt fut. Az authorization helper ezt a klienst hozza létre; service-role kulccsal működő klienst nem használ.
 
-A service-role kliens megkerüli az RLS-t. Nem alkalmas felhasználói hitelesítésre vagy tagság ellenőrzésére, és nem kerülhet kliensoldalra. Ebben a lépésben nincs service-role kliens, API-route vagy adatbázis-írás.
+A service-role kliens megkerüli az RLS-t. Nem alkalmas felhasználói hitelesítésre vagy tagság ellenőrzésére, és nem kerülhet kliensoldalra. Az ingestion route nem használ service-role klienst, nem ír adatbázisba, és nem hív OpenAI-t.
 
 ```mermaid
 sequenceDiagram
-  participant Route as Későbbi szerver API-route
+  actor Client as Hívó
+  participant Route as POST /api/products/ingest
   participant Cookies as Next.js cookies()
   participant Auth as Supabase Auth
   participant Guard as authorizeOrganizationIngestion
   participant DB as organization_members (RLS)
   participant Validation as productIngestionRequestSchema
 
+  Client->>Route: POST termékköteg
   Route->>Cookies: createUserSupabaseClient()
   Cookies-->>Route: cookie-alapú user-scoped kliens
   Route->>Auth: auth.getUser()
   Auth-->>Route: user vagy nincs hitelesített user
   Note over Route: Nincs user: 401
-  Route->>Guard: user.id, szerver által kiválasztott organizationId
+  Route->>Route: COMMERCE_DEMO_ORGANIZATION_ID UUID ellenőrzése
+  Note over Route: Hiányzó vagy hibás konfiguráció: 503
+  Route->>Guard: hitelesített user.id + szerveroldali organizationId
   Guard->>Cookies: createUserSupabaseClient()
   Cookies-->>Guard: cookie-alapú user-scoped kliens
   Guard->>DB: role lekérdezése user_id + organization_id alapján
-  DB-->>Guard: tagság, nincs tagság vagy query hiba
-  Note over Route,Guard: Nincs tagság, member, váratlan role vagy query hiba: tiltás
+  DB-->>Guard: szerepkör vagy query hiba
   Guard-->>Route: explicit engedélyezési eredmény
-  Route->>Validation: csak engedélyezett user esetén validál
+  Note over Route: Nincs tagság / nem engedélyezett szerep: 403; query hiba: 503
+  Route->>Route: request.json()
+  Route->>Validation: safeParse(body)
+  Note over Route: Hibás JSON vagy termékadat: 400
+  Route-->>Client: 200 validated, persisted=false
 ```
 
 ## Fájlok felelőssége
@@ -49,23 +56,39 @@ sequenceDiagram
 - `lib/supabase/server.ts` — lusta, cookie-alapú, szerveroldali user-scoped Supabase-kliens.
 - `lib/supabase/organization-authorization.ts` — tagság- és szerepkörellenőrzés explicit eredmény-unióval; csak `owner` és `admin` engedélyezett.
 - `tests/supabase/organization-authorization.test.mjs` — mockolt Supabase-lekérdezésekkel ellenőrzi az engedélyezett és tiltott eseteket.
-- `docs/architecture/PRODUCT_INGESTION.md` — a validálási réteg hatókörét és későbbi helyét dokumentálja.
+- `app/api/products/ingest/route.ts` — hitelesít, ellenőrzi a szerveroldali demo-szervezetet és a jogosultságot, majd validálja a JSON-t.
+- `tests/api/products-ingest.test.mjs` — mockokkal ellenőrzi a route HTTP-szerződését és a body feldolgozásának sorrendjét.
+- `docs/architecture/PRODUCT_INGESTION.md` — dokumentálja a validálási és API-folyamatot.
 
 ## Adatfolyam
 
-Az ábra a későbbi API-route tervezett kérésfolyamát mutatja: az auth- és authorization-helperek már megvannak, de a route és a DB-ingestion még nem implementált.
+Az ábra a megvalósított API-folyamatot a validálásig mutatja. Az embedding-generálás és az adatbázis-írás nem része ennek az endpointnak.
 
 ```mermaid
 flowchart TD
   Input["API-kérés"] --> Auth["Szerveroldali user- és szervezetellenőrzés"]
   Auth -->|engedélyezett| Schema["productIngestionRequestSchema"]
-  Auth -->|401 / 403| Denied["Kérés elutasítása"]
+  Auth -->|401 / 403 / 503| Denied["Kérés elutasítása"]
   Schema -->|érvényes| Typed["ProductIngestionRequest"]
   Schema -->|érvénytelen| Issues["Zod validációs hibák"]
-  Auth -. "tervezett" .-> Ingest["Embedding készítés és adatbázis-írás"]
+  Typed --> Success["200: validated; persisted=false"]
+  Issues --> BadRequest["400: validation_error"]
+  Typed -. "későbbi ticket" .-> Ingest["Embedding készítés és adatbázis-írás"]
 ```
 
-Az ábra az authorizationt és validálást összekapcsoló későbbi route-tervet mutatja. A szekvenciaábra a meglévő auth- és authorization-helperek szerződését szemlélteti; a route-integráció még nincs implementálva.
+Az ábra a megvalósított route-sorrendet mutatja; a pontozott kapcsolat egy későbbi, még nem implementált lépést jelöl.
+
+## API-kérés és HTTP-válaszok
+
+Az endpoint `POST /api/products/ingest`. A request body `userId` vagy `organization_id` mezője nem jogosultsági forrás. A szervezetet a szerveren beállított `COMMERCE_DEMO_ORGANIZATION_ID` változó adja; ennek UUID-nak kell lennie.
+
+- `200`: `{ "status": "validated", "product_count": number, "persisted": false }`. Ez kizárólag validálást jelent: a termékek **nem kerülnek mentésre**, és embedding sem készül.
+- `400`: hibás JSON vagy érvénytelen termékadat. A válasz validációs útvonalakat és üzeneteket tartalmaz, termék-payloadot nem.
+- `401`: nincs hitelesített felhasználó.
+- `403`: nincs szervezeti tagság, vagy a szerepkör nem `owner`/`admin`.
+- `503`: a hitelesítés nem érhető el, hiányzik/hibás a demo-szervezet konfigurációja, vagy hibázott a jogosultság-lekérdezés. Az adatbázishiba részletei nem kerülnek vissza.
+
+A route csak a sikeres jogosultság-ellenőrzés után olvassa be a request JSON-t. A `200` válasz nem jelenti az adatok tartósítását.
 
 ## Ellenőrzött szabályok
 
@@ -85,4 +108,4 @@ Az adatbázis oszlopaihoz és hosszkorlátaihoz igazodó szabályok a projekt á
 
 ## Interview explanation
 
-The validation layer checks product data and batch limits. A server-only helper reads the user's Supabase session from cookies. Another helper checks the user's organization role. Only owners and admins are allowed. Validation and authorization are different steps. A future API route must authenticate and authorize before it validates the product batch. No API route or database write is included yet.
+The API reads the user's Supabase session from cookies. It checks the user's organization role before reading and validating the product data. Only owners and admins are allowed. A successful response means the data is valid, but it is not saved. The route does not call OpenAI or write to the database.
