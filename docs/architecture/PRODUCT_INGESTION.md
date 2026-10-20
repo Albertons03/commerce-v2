@@ -107,7 +107,34 @@ flowchart LR
   Row -. "külön későbbi művelet" .-> DB["product_embeddings beszúrás"]
 ```
 
-A mapper csak adatot alakít át és ellenőriz; **nem persistál**, nem hív Supabase-t vagy OpenAI-t. Az adatbázis séma és a `VECTOR(1536)` méret a megadott szerződésből származik, élő adatbázison nem lett ellenőrizve.
+A mapper csak adatot alakít át és ellenőriz; **nem persistál**, nem hív Supabase-t vagy OpenAI-t.
+
+## Product embedding persistence
+
+A `lib/products/product-persistence.ts` szerveroldali, `server-only` modulja a `createUserSupabaseClient()` cookie-alapú user-scoped kliensével ír a `product_embeddings` táblába. Service-role klienst nem készít. A függvény fogadja az engedélyezett szervezet UUID-ját, a mapper által előállított sorokat és az `overwriteExisting` kapcsolót. A beszúrás előtt elutasítja az üres köteget, ismétlődő `product_id`-kat, hibás azonosítókat és más szervezethez tartozó sorokat; minden elutasítás a Supabase-hívás előtt történik.
+
+- `overwriteExisting: false`: az egyedi kulcs `organization_id,product_id`; a kliens `ignoreDuplicates: true` opciója az `ON CONFLICT DO NOTHING` viselkedésnek felel meg. Meglévő rekordot nem frissít.
+- `overwriteExisting: true`: ugyanezen kulccsal `ON CONFLICT DO UPDATE` upsert történik.
+- Mindkét ágnál `defaultToNull: false` van beállítva. A kihagyott `product_currency` és `metadata` beszúráskor a DB-defaultot kapja (`USD`, `{}`); konfliktusos upsertnél ezek a kihagyott mezők megőrzik a meglévő értéküket. A mapper által `null`-ként megadott kategória, ár, URL és token mezők overwrite esetén viszont törlik a meglévő értéket. Az `is_active` nincs a mapper sorában: új sornál DB-default (`true`), frissítésnél a meglévő állapot marad.
+- A kliens `.select("product_id")` visszakérdezésével a sikeres beszúrt/frissített sorok számolható. A függvény `successfulCount` értéket csak akkor ad, ha a válaszban valóban tömb érkezik; DB-hibánál csak általános `database_error` státuszt ad vissza, a nyers hiba részleteit nem.
+
+```mermaid
+flowchart LR
+  Authorized["Szerver által engedélyezett organization_id"] --> Mapper["mapProductToEmbeddingRow"]
+  Product["Validált termék + embedding"] --> Mapper
+  Mapper --> Rows["ProductEmbeddingRow[]"]
+  Rows --> Writer["persistProductEmbeddings"]
+  UserClient["Cookie-alapú user-scoped kliens"] --> Writer
+  Writer -->|overwriteExisting=false: ignore duplicates| Insert["INSERT / ON CONFLICT DO NOTHING"]
+  Writer -->|overwriteExisting=true: merge| Upsert["UPSERT / ON CONFLICT DO UPDATE"]
+  Insert --> Table["product_embeddings + RLS"]
+  Upsert --> Table
+  Table --> Result["Ärintett sorok vagy általános hiba"]
+```
+
+Ez a persistence helper önálló modul: az ingestion API-route továbbra is csak validál, és egyelőre nem hívja meg. Nincs élő user-session integrációs teszt.
+
+Az adatbázis-séma, egyedi kulcs, `VECTOR(1536)`, RLS és jogosultságok a megadott élő, read-only ellenőrzés alapján tekintendők igazoltnak; ebben a feladatban nem történt új Supabase-kapcsolat.
 
 ## Ellenőrzött szabályok
 

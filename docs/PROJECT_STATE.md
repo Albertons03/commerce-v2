@@ -46,15 +46,19 @@ made.
 
 ## Product Embedding Persistence Contract
 
-- COM-005B/3: Authorized validation-only ingestion API, base commit
-  `552b305`.
-- COM-005C/1: Pure `ProductInput` and embedding-to-row mapper implemented.
-  Mapper tests: 8 passed. Existing product-ingestion, authorization, API-route,
-  and AI Core tests: 29 passed. ESLint, TypeScript, production build, and
-  `git diff --check` passed. No Supabase or OpenAI calls and no database writes.
-- Updated ingestion architecture documentation. The database contract,
-  including `VECTOR(1536)`, remains unverified against the live database.
+- COM-005C/1: Pure `ProductInput` and embedding-to-row mapper implemented at
+  base commit `3fb6b86`.
+- COM-005C/2B: Server-only persistence writer implemented using the
+  authenticated user-scoped Supabase SSR client. Persistence tests cover
+  ignore-conflict insert, overwrite upsert, validation, sanitized failures,
+  database defaults, and client boundary (10 passed). Existing mapper,
+  ingestion API, authorization, validation, and AI Core tests: 37 passed.
+  ESLint, TypeScript, production build, and `git diff --check` passed. No live
+  Supabase or OpenAI calls and no database writes were made.
+- The manually verified live contract is documented in
+  `docs/architecture/PRODUCT_INGESTION.md`. No live user-session integration
+  test has been performed.
 
 ## Next Planned Task
 
-COM-005C/2.
+COM-005C/3.
