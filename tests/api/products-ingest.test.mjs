@@ -15,12 +15,18 @@ const schemaPath = path.resolve(
   testDirectory,
   "../../lib/validations/product-ingestion.ts"
 );
+const mapperPath = path.resolve(
+  testDirectory,
+  "../../lib/products/product-embedding-mapper.ts"
+);
 const validProduct = {
   product_id: "sku-1",
   product_name: "Demo product",
   product_description: "A sufficiently long product description.",
 };
 const demoOrganizationId = "00000000-0000-4000-8000-000000000001";
+const resolvedModel = "text-embedding-3-small";
+const vector = () => Array.from({ length: 1536 }, () => 0.1);
 
 function transpileModule(sourcePath) {
   const source = fs.readFileSync(sourcePath, "utf8");
@@ -73,6 +79,9 @@ function setup({
   user = { id: "authenticated-user" },
   authError = null,
   authorization = { authorized: true, role: "owner" },
+  embed,
+  persist,
+  mapper,
 } = {}) {
   const calls = [];
   const supabase = {
@@ -83,7 +92,54 @@ function setup({
       },
     },
   };
+  const realMapper = loadModule(mapperPath);
+  const defaultEmbed = async (products, options) => {
+    calls.push(["generateEmbeddings", products, options]);
+    return {
+      results: products.map((product) => ({
+        product_id: product.product_id,
+        embedding: vector(),
+        text: "text",
+        tokenUsage: 1,
+        model: resolvedModel,
+      })),
+      model: resolvedModel,
+    };
+  };
+  const defaultPersist = async (...args) => {
+    calls.push(["persistProductEmbeddings", ...args]);
+    return {
+      status: "success",
+      attemptedCount: args[1].length,
+      successfulCount: args[1].length,
+      operation: args[2] ? "upsert" : "insert",
+    };
+  };
   const dependencies = {
+    "@/lib/ai/embedding-service": {
+      generateEmbeddings: async (...args) => {
+        if (embed) {
+          calls.push(["generateEmbeddings", ...args]);
+          return embed(...args);
+        }
+        return defaultEmbed(...args);
+      },
+    },
+    "@/lib/products/product-embedding-mapper": {
+      mapProductToEmbeddingRow: (...args) => {
+        calls.push(["mapProductToEmbeddingRow", ...args]);
+        return (mapper ?? realMapper.mapProductToEmbeddingRow)(...args);
+      },
+    },
+    "@/lib/products/product-persistence": {
+      persistProductEmbeddings: async (...args) => {
+        if (persist) {
+          calls.push(["persistProductEmbeddings", ...args]);
+          return persist(...args);
+        }
+        return defaultPersist(...args);
+      },
+    },
     "@/lib/supabase/server": {
       createUserSupabaseClient: async () => {
         calls.push(["createUserSupabaseClient"]);
@@ -249,14 +305,247 @@ for (const role of ["owner", "admin"]) {
 
       assert.equal(result.response.status, 200);
       assert.deepEqual(result.payload, {
-        status: "validated",
-        product_count: 1,
-        persisted: false,
+        status: "persisted",
+        persisted: true,
+        attempted_count: 1,
+        successful_count: 1,
       });
       assert.equal(JSON.stringify(result.payload).includes("Demo product"), false);
     });
   });
 }
+
+const names = (calls) => calls.map(([name]) => name);
+const find = (calls, name) => calls.find(([n]) => n === name);
+const SECRET = "sk-secret SELECT * FROM products";
+
+test("pre-embedding failures never reach embedding or persistence", async () => {
+  const cases = [
+    [{ user: null }, undefined],
+    [{ authorization: { authorized: false, reason: "not_member" } }, undefined],
+    [{}, { products: [] }],
+  ];
+  for (const [options, body] of cases) {
+    await withDemoOrganizationId(demoOrganizationId, async () => {
+      const result = await post(options, body ?? { products: [validProduct] });
+      assert.equal(result.calls.some(([n]) => n === "generateEmbeddings"), false);
+      assert.equal(result.calls.some(([n]) => n === "persistProductEmbeddings"), false);
+    });
+  }
+});
+
+test("rejects duplicate product IDs before any embedding call", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post(
+      {},
+      { products: [validProduct, { ...validProduct, product_name: "Other" }] }
+    );
+
+    assert.equal(result.response.status, 400);
+    assert.equal(result.payload.error.code, "validation_error");
+    assert.deepEqual(result.payload.error.details, [
+      { path: "products.1.product_id", message: "Duplicate product_id in request" },
+    ]);
+    assert.equal(names(result.calls).includes("generateEmbeddings"), false);
+    assert.equal(names(result.calls).includes("persistProductEmbeddings"), false);
+  });
+});
+
+test("forwards batch_size, overwrite_existing, model and authorized org", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const second = { ...validProduct, product_id: "sku-2" };
+    const result = await post(
+      {},
+      {
+        organization_id: "00000000-0000-4000-8000-000000000002",
+        products: [validProduct, second],
+        batch_size: 5,
+        overwrite_existing: true,
+      }
+    );
+
+    assert.equal(result.response.status, 200);
+    assert.equal(find(result.calls, "generateEmbeddings")[2].batchSize, 5);
+    const mapCalls = result.calls.filter(([n]) => n === "mapProductToEmbeddingRow");
+    assert.equal(mapCalls.length, 2);
+    for (const call of mapCalls) {
+      assert.equal(call[1], demoOrganizationId);
+      assert.equal(call[4], resolvedModel);
+      assert.equal(call[5], undefined);
+    }
+    assert.deepEqual(mapCalls.map((c) => c[2].product_id), ["sku-1", "sku-2"]);
+
+    const persistCalls = result.calls.filter(([n]) => n === "persistProductEmbeddings");
+    assert.equal(persistCalls.length, 1);
+    const [, org, rows, overwrite] = persistCalls[0];
+    assert.equal(org, demoOrganizationId);
+    assert.equal(overwrite, true);
+    assert.deepEqual(rows.map((r) => r.product_id), ["sku-1", "sku-2"]);
+    assert.equal(rows.every((r) => r.organization_id === demoOrganizationId), true);
+    assert.equal(rows.every((r) => r.embedding_model === resolvedModel), true);
+    assert.equal(result.payload.successful_count, 2);
+  });
+});
+
+test("defaults to batch_size 10 and overwrite_existing false", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post();
+    assert.equal(find(result.calls, "generateEmbeddings")[2].batchSize, 10);
+    assert.equal(find(result.calls, "persistProductEmbeddings")[3], false);
+  });
+});
+
+test("missing or mismatched embedding results never reach persistence", async () => {
+  const bad = [
+    async () => ({ results: [], model: resolvedModel }),
+    async (products) => ({
+      results: products.map(() => ({
+        product_id: "other",
+        embedding: vector(),
+        model: resolvedModel,
+      })),
+    }),
+  ];
+  for (const embed of bad) {
+    await withDemoOrganizationId(demoOrganizationId, async () => {
+      const result = await post({ embed });
+      assert.equal(result.response.status, 500);
+      assert.equal(result.payload.error.code, "internal_error");
+      assert.equal(names(result.calls).includes("mapProductToEmbeddingRow"), false);
+      assert.equal(names(result.calls).includes("persistProductEmbeddings"), false);
+    });
+  }
+});
+
+test("embedding failure returns sanitized 503", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post({
+      embed: async () => {
+        throw new Error(SECRET);
+      },
+    });
+    assert.equal(result.response.status, 503);
+    assert.equal(result.payload.error.code, "embedding_unavailable");
+    assert.equal(JSON.stringify(result.payload).includes("secret"), false);
+    assert.equal(names(result.calls).includes("persistProductEmbeddings"), false);
+  });
+});
+
+test("persistence database failure returns sanitized 503", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post({
+      persist: async () => ({
+        status: "error",
+        attemptedCount: 1,
+        error: "database_error",
+      }),
+    });
+    assert.equal(result.response.status, 503);
+    assert.equal(result.payload.error.code, "persistence_unavailable");
+    assert.equal(JSON.stringify(result.payload).includes("secret"), false);
+  });
+});
+
+test("mapper contract failure returns sanitized 500 without persistence", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post({
+      mapper: () => {
+        throw new TypeError(SECRET);
+      },
+    });
+    assert.equal(result.response.status, 500);
+    assert.equal(JSON.stringify(result.payload).includes("secret"), false);
+    assert.equal(names(result.calls).includes("persistProductEmbeddings"), false);
+  });
+});
+
+test("writer contract failures return sanitized 500", async () => {
+  const writers = [
+    async () => {
+      throw new Error(SECRET);
+    },
+    async () => ({
+      status: "error",
+      attemptedCount: 1,
+      error: "duplicate_product_ids",
+    }),
+  ];
+  for (const persist of writers) {
+    await withDemoOrganizationId(demoOrganizationId, async () => {
+      const result = await post({ persist });
+      assert.equal(result.response.status, 500);
+      assert.equal(result.payload.error.code, "internal_error");
+      assert.equal(JSON.stringify(result.payload).includes("secret"), false);
+    });
+  }
+});
+
+test("reports success with zero affected rows", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post({
+      persist: async () => ({
+        status: "success",
+        attemptedCount: 1,
+        successfulCount: 0,
+        operation: "insert",
+      }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.payload, {
+      status: "persisted",
+      persisted: true,
+      attempted_count: 1,
+      successful_count: 0,
+    });
+  });
+});
+
+test("omits successful_count when the writer does not provide it", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    const result = await post({
+      persist: async () => ({
+        status: "success",
+        attemptedCount: 1,
+        operation: "upsert",
+      }),
+    });
+    assert.equal(result.response.status, 200);
+    assert.deepEqual(result.payload, {
+      status: "persisted",
+      persisted: true,
+      attempted_count: 1,
+    });
+  });
+});
+
+test("does not respond before persistence resolves", async () => {
+  await withDemoOrganizationId(demoOrganizationId, async () => {
+    let release;
+    let started;
+    const startedPromise = new Promise((resolve) => (started = resolve));
+    const { POST } = setup({
+      persist: (...args) => {
+        started();
+        return new Promise((resolve) => {
+          release = () =>
+            resolve({ status: "success", attemptedCount: args[1].length });
+        });
+      },
+    });
+    let settled = false;
+    const pending = POST(makeRequest({ products: [validProduct] })).then((r) => {
+      settled = true;
+      return r;
+    });
+
+    await startedPromise;
+    await new Promise((resolve) => setImmediate(resolve));
+    assert.equal(settled, false);
+    release();
+    const response = await pending;
+    assert.equal(response.status, 200);
+  });
+});
 
 test("ignores spoofed user and organization IDs in the body", async () => {
   await withDemoOrganizationId(demoOrganizationId, async () => {
