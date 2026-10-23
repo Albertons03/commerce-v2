@@ -1,3 +1,4 @@
+
 import "server-only";
 
 import { createServerClient } from "@supabase/ssr";
@@ -22,10 +23,24 @@ export async function createUserSupabaseClient() {
       getAll() {
         return cookieStore.getAll();
       },
+
       setAll(cookiesToSet) {
-        cookiesToSet.forEach(({ name, value, options }) => {
-          cookieStore.set(name, value, options);
-        });
+        try {
+          cookiesToSet.forEach(({ name, value, options }) => {
+            cookieStore.set(name, value, options);
+          });
+        } catch (error) {
+          // Server Components cannot write cookies.
+          // Other errors must not be silently ignored.
+          if (
+            !(error instanceof Error) ||
+            !error.message.includes(
+              "Cookies can only be modified"
+            )
+          ) {
+            throw error;
+          }
+        }
       },
     },
   });

@@ -1,12 +1,15 @@
+
 import { Suspense } from "react";
 import { redirect } from "next/navigation";
+import { connection } from "next/server";
 import { createUserSupabaseClient } from "@/lib/supabase/server";
 import ProductIngestion from "./product-ingestion";
-import { connection } from "next/server";
+import CsvProductUpload from "./csv-product-upload";
 import ProductCatalog from "./product-catalog";
 
 async function ProtectedDashboard() {
-    await connection();
+  await connection();
+
   const supabase = await createUserSupabaseClient();
 
   const {
@@ -19,17 +22,18 @@ async function ProtectedDashboard() {
   }
 
   return (
-   <main className="min-h-screen bg-zinc-950 text-white">
-    <div className="mx-auto max-w-5xl px-6 pt-6 text-right text-sm text-zinc-400">
-      Signed in as:{" "}
-      <span className="font-medium text-indigo-400">
-        {user.email ?? "Unknown user"}
-      </span>
-    </div>
+    <main className="min-h-screen bg-zinc-950 text-white">
+      <div className="mx-auto max-w-5xl px-6 pt-6 text-right text-sm text-zinc-400">
+        Signed in as:{" "}
+        <span className="font-medium text-indigo-400">
+          {user.email ?? "Unknown user"}
+        </span>
+      </div>
 
-    <ProductIngestion />
-    <ProductCatalog />
-  </main>
+      <ProductIngestion />
+      <CsvProductUpload />
+      <ProductCatalog />
+    </main>
   );
 }
 
