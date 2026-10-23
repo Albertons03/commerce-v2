@@ -3,6 +3,7 @@ import { redirect } from "next/navigation";
 import { createUserSupabaseClient } from "@/lib/supabase/server";
 import ProductIngestion from "./product-ingestion";
 import { connection } from "next/server";
+import ProductCatalog from "./product-catalog";
 
 async function ProtectedDashboard() {
     await connection();
@@ -27,6 +28,7 @@ async function ProtectedDashboard() {
     </div>
 
     <ProductIngestion />
+    <ProductCatalog />
   </main>
   );
 }
