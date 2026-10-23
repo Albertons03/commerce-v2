@@ -98,6 +98,10 @@ A `lib/products/product-embedding-mapper.ts` tiszta leképezőfüggvénye a szer
 
 A termék mezői az adatbázis oszlopneveire képződnek le. A nem megadott kategória, ár és URL mezők SQL `NULL`-ként szerepelnek. A hiányzó pénznem és metadata nincs hozzáadva a beszúrási objektumhoz, így a tábla alapértékei (`USD`, illetve `{}`) érvényesülhetnek. A hiányzó token-szám `NULL`. A vektornak pontosan 1536 véges számot kell tartalmaznia. Az `id`, `created_at`, `updated_at` és `is_active` mezőket a mapper nem állítja elő, ezeket az adatbázis alapértékeire bízza.
 
+### Embedding model contract
+
+The embedding service only accepts `text-embedding-3-small`, whose default output is 1536 dimensions. `resolveEmbeddingModel()` exposes the resolved model identifier; `generateEmbeddings()` and each returned embedding result include that identifier. An incompatible `OPENAI_EMBEDDING_MODEL` setting or explicit model is rejected before an OpenAI request, and generated vectors are checked for exactly 1536 finite values before being returned. The mapper should receive the model identifier from the corresponding embedding result rather than resolving it independently.
+
 ```mermaid
 flowchart LR
   Product["Validált ProductInput"] --> Mapper["mapProductToEmbeddingRow"]

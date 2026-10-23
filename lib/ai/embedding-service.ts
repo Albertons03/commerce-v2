@@ -34,6 +34,7 @@ export interface EmbeddingResult {
   embedding: number[];
   text: string;
   tokenUsage: TokenUsage;
+  model: string;
 }
 
 export interface BatchEmbeddingResult {
@@ -41,6 +42,7 @@ export interface BatchEmbeddingResult {
   totalTokens: number;
   estimatedCost: number;
   duration: number;
+  model: string;
 }
 
 export interface EmbeddingOptions {
@@ -55,7 +57,30 @@ export interface EmbeddingOptions {
 
 const DEFAULT_MODEL =
   process.env.OPENAI_EMBEDDING_MODEL || "text-embedding-3-small";
+const SUPPORTED_MODEL = "text-embedding-3-small";
+const EMBEDDING_DIMENSIONS = 1536;
 const DEFAULT_BATCH_SIZE = 10;
+
+export function resolveEmbeddingModel(model: string = DEFAULT_MODEL): string {
+  if (model !== SUPPORTED_MODEL) {
+    throw new TypeError(
+      `Embedding model must be ${SUPPORTED_MODEL} for ${EMBEDDING_DIMENSIONS}-dimensional product embeddings`
+    );
+  }
+
+  return model;
+}
+
+function validateEmbedding(embedding: number[]): void {
+  if (
+    embedding.length !== EMBEDDING_DIMENSIONS ||
+    !embedding.every((value) => Number.isFinite(value))
+  ) {
+    throw new Error(
+      `Embedding response must contain exactly ${EMBEDDING_DIMENSIONS} finite numbers`
+    );
+  }
+}
 
 // =====================================================
 // Text Preprocessing
@@ -122,6 +147,7 @@ export async function generateEmbedding(
   organizationId?: string,
   model: string = DEFAULT_MODEL
 ): Promise<number[]> {
+  const resolvedModel = resolveEmbeddingModel(model);
   const startTime = Date.now();
 
   // Preprocess text
@@ -132,7 +158,7 @@ export async function generateEmbedding(
 
     const response = await withRetry(async () => {
       return await openai.embeddings.create({
-        model,
+        model: resolvedModel,
         input: processedText,
         encoding_format: "float",
       });
@@ -142,10 +168,11 @@ export async function generateEmbedding(
     if (!embedding) {
       throw new Error("No embedding returned from OpenAI");
     }
+    validateEmbedding(embedding);
 
     const processingTime = Date.now() - startTime;
     const tokenUsage = extractTokenUsage(response);
-    const cost = estimateCost(tokenUsage, model);
+    const cost = estimateCost(tokenUsage, resolvedModel);
 
     console.log("[Embedding Service] Single embedding generated:", {
       text_length: text.length,
@@ -183,6 +210,7 @@ export async function generateEmbeddings(
     batchSize = DEFAULT_BATCH_SIZE,
     onProgress,
   } = options;
+  const resolvedModel = resolveEmbeddingModel(model);
 
   const startTime = Date.now();
   const allResults: EmbeddingResult[] = [];
@@ -195,7 +223,7 @@ export async function generateEmbeddings(
     const batch = batches[i];
 
     // Generate embeddings for this batch
-    const batchResults = await generateEmbeddingsBatch(batch, model);
+    const batchResults = await generateEmbeddingsBatch(batch, resolvedModel);
     allResults.push(...batchResults);
 
     // Update token count
@@ -215,7 +243,7 @@ export async function generateEmbeddings(
   const duration = Date.now() - startTime;
   const estimatedCostValue = estimateCost(
     { promptTokens: totalTokens, totalTokens },
-    model
+    resolvedModel
   );
 
   return {
@@ -223,6 +251,7 @@ export async function generateEmbeddings(
     totalTokens,
     estimatedCost: estimatedCostValue,
     duration,
+    model: resolvedModel,
   };
 }
 
@@ -253,11 +282,13 @@ async function generateEmbeddingsBatch(
 
   const results: EmbeddingResult[] = products.map((product, index) => {
     const embedding = response.data[index].embedding;
+    validateEmbedding(embedding);
 
     return {
       product_id: product.product_id,
       embedding,
       text: texts[index],
+      model,
       tokenUsage: {
         promptTokens: tokensPerText,
         totalTokens: tokensPerText,
@@ -280,12 +311,13 @@ export async function generateSingleEmbedding(
   product: ProductInput,
   model: string = DEFAULT_MODEL
 ): Promise<EmbeddingResult> {
+  const resolvedModel = resolveEmbeddingModel(model);
   const text = prepareTextForEmbedding(product);
 
   const response = await withRetry(async () => {
     const client = getOpenAIClient();
     return await client.embeddings.create({
-      model,
+      model: resolvedModel,
       input: text,
       encoding_format: "float",
     });
@@ -293,11 +325,13 @@ export async function generateSingleEmbedding(
 
   const tokenUsage = extractTokenUsage(response);
   const embedding = response.data[0].embedding;
+  validateEmbedding(embedding);
 
   return {
     product_id: product.product_id,
     embedding,
     text,
+    model: resolvedModel,
     tokenUsage,
   };
 }

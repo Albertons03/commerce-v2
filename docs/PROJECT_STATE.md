@@ -58,7 +58,16 @@ made.
 - The manually verified live contract is documented in
   `docs/architecture/PRODUCT_INGESTION.md`. No live user-session integration
   test has been performed.
+- COM-005C/3B: Embedding generation restricted to
+  `text-embedding-3-small`; generated vectors are enforced to contain exactly
+  1536 finite dimensions. Resolved model identifiers are included in batch and
+  product-single results, while `generateEmbedding(): Promise<number[]>`
+  remains unchanged. Added offline embedding-service tests and the
+  `npm run test:embedding-service` script. Verification: 54/54 automated tests
+  passed; ESLint, TypeScript, Next.js production build, and `git diff --check`
+  passed (with non-blocking LF/CRLF warnings). No live OpenAI or Supabase
+  requests were made. The ingestion API route is not yet integrated.
 
 ## Next Planned Task
 
-COM-005C/3.
+COM-005C/3C — Ingestion Route Integration.

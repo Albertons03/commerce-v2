@@ -8,6 +8,7 @@
     "start": "next start",
     "lint": "eslint",
     "test:ai-core": "node --test tests/ai/openai-client.test.mjs",
+    "test:embedding-service": "node --test tests/ai/embedding-service.test.mjs",
     "test:product-ingestion": "node --test tests/validations/product-ingestion.test.mjs",
     "test:organization-authorization": "node --test tests/supabase/organization-authorization.test.mjs",
     "test:products-ingest": "node --test tests/api/products-ingest.test.mjs",
