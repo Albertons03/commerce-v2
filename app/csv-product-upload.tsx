@@ -11,9 +11,15 @@ const MAX_FILE_BYTES = 1024 * 1024;
 const IMPORT_BATCH_SIZE = 10;
 
 type ImportSummary = {
-  confirmed: number;
-  failed: number;
+  inserted: number;
+  skipped: number;
+  unconfirmed: number;
   messages: string[];
+};
+
+type ImportCounts = {
+  inserted: number;
+  skipped: number;
 };
 
 function getApiError(data: unknown): string {
@@ -39,7 +45,12 @@ function getApiError(data: unknown): string {
   return "Product ingestion failed.";
 }
 
-function getConfirmedCount(data: unknown, expected: number): number {
+
+
+function getImportCounts(
+  data: unknown,
+  expected: number
+): ImportCounts {
   if (
     typeof data !== "object" ||
     data === null ||
@@ -54,24 +65,33 @@ function getConfirmedCount(data: unknown, expected: number): number {
   }
 
   if (
-    "successful_count" in data &&
-    data.successful_count !== undefined
+    !("successful_count" in data) ||
+    typeof data.successful_count !== "number" ||
+    !Number.isInteger(data.successful_count) ||
+    data.successful_count < 0 ||
+    data.successful_count > expected
   ) {
-    if (
-      typeof data.successful_count !== "number" ||
-      !Number.isInteger(data.successful_count) ||
-      data.successful_count < 0 ||
-      data.successful_count > expected
-    ) {
-      throw new Error("Invalid server import count.");
-    }
-
-    return data.successful_count;
+    throw new Error("Invalid or missing successful_count.");
   }
 
-  throw new Error(
-    "Server did not provide a verified successful_count."
-  );
+  if (
+    !("skipped_count" in data) ||
+    typeof data.skipped_count !== "number" ||
+    !Number.isInteger(data.skipped_count) ||
+    data.skipped_count < 0 ||
+    data.skipped_count > expected
+  ) {
+    throw new Error("Invalid or missing skipped_count.");
+  }
+
+  if (data.successful_count + data.skipped_count !== expected) {
+    throw new Error("Server import counts do not match.");
+  }
+
+  return {
+    inserted: data.successful_count,
+    skipped: data.skipped_count,
+  };
 }
 
 export default function CsvProductUpload() {
@@ -133,8 +153,9 @@ export default function CsvProductUpload() {
 
     const products = preview.validProducts;
     const messages: string[] = [];
-    let confirmed = 0;
-    let failed = 0;
+    let inserted = 0;
+    let skipped = 0;
+    let unconfirmed = 0;
 
     setImporting(true);
     setSummary(null);
@@ -169,17 +190,17 @@ export default function CsvProductUpload() {
             throw new Error(getApiError(data));
           }
 
-          const count = getConfirmedCount(data, batch.length);
-          confirmed += count;
-          failed += batch.length - count;
+          const counts = getImportCounts(data, batch.length);
+          inserted += counts.inserted;
+          skipped += counts.skipped;
 
-          if (count !== batch.length) {
+          if (counts.skipped > 0) {
             messages.push(
-              `Batch ${batchNumber}: ${count}/${batch.length} confirmed.`
+              `Batch ${batchNumber}: ${counts.skipped} existing products skipped.`
             );
           }
         } catch (cause) {
-          failed += batch.length;
+          unconfirmed += batch.length;
 
           messages.push(
             `Batch ${batchNumber}: ${
@@ -195,7 +216,7 @@ export default function CsvProductUpload() {
         );
       }
     } finally {
-      setSummary({ confirmed, failed, messages });
+      setSummary({ inserted, skipped, unconfirmed, messages });
       setImporting(false);
     }
   }
@@ -327,18 +348,22 @@ export default function CsvProductUpload() {
       )}
 
       {summary && (
-        <div role="status" className="mt-6 rounded-xl border border-zinc-700 p-4 text-sm">
-          <p className="font-semibold">
-            Import completed
-          </p>
+        <div
+          role="status"
+          className="mt-6 rounded-xl border border-zinc-700 p-4 text-sm"
+        >
+          <p className="font-semibold">Import finished</p>
           <p className="mt-2 text-emerald-400">
-            Confirmed: {summary.confirmed}
+            Inserted: {summary.inserted}
           </p>
           <p className="text-amber-400">
-            Failed or unconfirmed: {summary.failed}
+            Skipped (already existing): {summary.skipped}
+          </p>
+          <p className="text-red-400">
+            Failed / Unconfirmed: {summary.unconfirmed}
           </p>
           {summary.messages.map((message, index) => (
-            <p key={index} className="mt-2 text-red-400">
+            <p key={index} className="mt-2 text-zinc-400">
               {message}
             </p>
           ))}

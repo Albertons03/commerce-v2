@@ -212,13 +212,30 @@ export async function POST(request: NextRequest) {
     return internalError();
   }
 
+
+  const attemptedCount = persistence.attemptedCount;
+  const successfulCount = persistence.successfulCount;
+
+  const hasVerifiedCount =
+    typeof successfulCount === "number" &&
+    Number.isInteger(successfulCount) &&
+    successfulCount >= 0 &&
+    successfulCount <= attemptedCount;
+
   return NextResponse.json(
     {
       status: "persisted",
       persisted: true,
-      attempted_count: persistence.attemptedCount,
-      ...(persistence.successfulCount !== undefined
-        ? { successful_count: persistence.successfulCount }
+      attempted_count: attemptedCount,
+      ...(hasVerifiedCount && successfulCount !== undefined
+        ? {
+            successful_count: successfulCount,
+            ...(!overwrite_existing
+              ? {
+                  skipped_count: attemptedCount - successfulCount,
+                }
+              : {}),
+          }
         : {}),
     },
     { status: 200 }
