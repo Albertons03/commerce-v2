@@ -68,6 +68,82 @@ made.
   passed (with non-blocking LF/CRLF warnings). No live OpenAI or Supabase
   requests were made. The ingestion API route is not yet integrated.
 
+## Ingestion API Integration and Live MVP Progress (October 2026)
+
+- COM-005C/3C is no longer the next planned task. The ingestion API has since
+  been integrated with authentication, organization authorization, request
+  validation, OpenAI embedding generation, embedding-row mapping, and
+  Supabase persistence. The current endpoint is `POST /api/products/ingest`.
+- The server-side writer uses conflict key `organization_id,product_id`.
+  `overwrite_existing: false` skips conflicting products; overwrite mode
+  uses upsert semantics. Successful responses include `attempted_count` and,
+  when verified, `successful_count`. With overwrite disabled, a verified
+  `skipped_count` is also returned.
+- A product catalog is visible in the app. During the October 24 CSV retest,
+  the screenshot showed 39 products; this is an observed UI count, not a
+  separately audited database count.
+- A Next.js 16 server-component cookie-write issue was addressed in
+  `lib/supabase/server.ts` with a targeted catch for the prohibited cookie
+  modification case. Supabase SSR proxy/session-refresh architecture still
+  merits a focused later review; do not conflate this with a failed CSV test.
+
+## COM-009 — CSV Bulk Product Upload (Completed)
+
+- Commit `9498ba3` (`feat: add CSV bulk product ingestion`).
+- Main files: `app/csv-product-upload.tsx`, `app/page.tsx`,
+  `lib/products/parse-product-csv.ts`, `lib/supabase/server.ts`, and
+  `tests/products/parse-product-csv.test.mjs`.
+- CSV upload validates a maximum of 50 products, required columns
+  `product_id`, `product_name`, `product_description`, and supported optional
+  columns `category`, `price`, `currency`, `product_url`,
+  `product_image_url`. Parser handles CSV quoting, duplicate IDs, and
+  row-level validation. UI previews rows and sends valid products in
+  batches of 10 to `POST /api/products/ingest`.
+- The original three-product CSV import succeeded end to end: 3 confirmed,
+  0 failed; products appeared in the catalog. The CSV parser's 11 focused
+  tests passed, as did TypeScript, ESLint, and production build.
+
+## COM-009C — Duplicate Import Handling (Completed October 24, 2026)
+
+- Commit `60f6e4b` (`fix: distinguish inserted and skipped CSV products`),
+  on branch `master`.
+- Modified `app/api/products/ingest/route.ts` and
+  `app/csv-product-upload.tsx`.
+- API now reports verified `skipped_count = attempted_count - successful_count`
+  for non-overwrite imports. The UI validates both counts and ensures their
+  sum matches the batch size; it displays `Inserted`, `Skipped (already
+  existing)`, and `Failed / Unconfirmed` separately.
+- Unconfirmed is intentionally not treated as proof of a failed database
+  write (for example, a network error can obscure the result).
+- Live repeat import of the same three-product `test-products.csv`:
+  **Inserted 0; Skipped 3; Failed / Unconfirmed 0**. The UI reported
+  `Batch 1: 3 existing products skipped.`
+- Verification after changes: `npx tsc --noEmit`, `npm run lint`,
+  `npm run build`, `git diff --check`, and `git diff --cached --check`
+  all passed. The commit succeeded.
+- Immediately after commit, `git status --short` showed only two untracked
+  local files: `lib/products/parse-product-csv.test.mjs` (duplicate test
+  file) and `test-products.csv` (local fixture). Neither was committed.
+
+## Known Follow-ups and Boundaries
+
+- Prior historical test counts and the earlier `npm audit` finding above
+  describe the stage at which they were recorded; do not present them as
+  newly rerun or currently resolved.
+- Before a new task, inspect current Git status and existing docs. Do not
+  add or delete the two untracked local files without an explicit decision.
+- A later small UI ticket may improve dashboard and Product Catalog layout
+  width/responsiveness. Do not combine cosmetic redesign with ingestion
+  correctness fixes.
+- Focused future security work: verify Supabase SSR session refresh/proxy
+  behavior and re-check dependency audit when relevant.
+
 ## Next Planned Task
 
-COM-005C/3C — Ingestion Route Integration.
+1. Commit this updated `docs/PROJECT_STATE.md` as a documentation-only change
+   after reviewing its diff (not yet committed by the assistant).
+2. Select the next small MVP ticket after inspecting the current app and
+   architecture. Candidate: review the post-ingestion product search/RAG
+   user flow, or a narrowly scoped responsive dashboard layout improvement.
+   No ticket has been formally selected yet.
+
