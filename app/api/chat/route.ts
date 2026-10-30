@@ -1,4 +1,3 @@
-
 import "server-only";
 
 import { NextRequest, NextResponse } from "next/server";
@@ -6,8 +5,20 @@ import { createUserSupabaseClient } from "@/lib/supabase/server";
 import { performVectorSearch } from "@/lib/ai/rag-service";
 import { buildRAGPrompt } from "@/lib/ai/prompt-builder";
 import { generateChatResponse } from "@/lib/ai/chat-service";
+import { extractPriceFilter } from "@/lib/ai/extract-price-filter";
+import { getCatalogFallback } from "@/lib/ai/catalog-fallback";
 
+function isGeneralCatalogQuery(query: string): boolean {
+  const normalized = query.trim().toLowerCase();
 
+  return [
+    "milyen termékeket ajánlasz",
+    "milyen termékeitek vannak",
+    "mutasd a termékeket",
+    "show me your products",
+    "what products do you have",
+  ].some((phrase) => normalized.includes(phrase));
+}
 
 export async function POST(request: NextRequest) {
   try {
@@ -19,19 +30,12 @@ export async function POST(request: NextRequest) {
     } = await supabase.auth.getUser();
 
     if (authError || !user) {
-      return NextResponse.json(
-        { error: "Unauthorized" },
-        { status: 401 },
-      );
+      return NextResponse.json({ error: "Unauthorized" }, { status: 401 });
     }
 
     const body: unknown = await request.json();
 
-    if (
-      !body ||
-      typeof body !== "object" ||
-      Array.isArray(body)
-    ) {
+    if (!body || typeof body !== "object" || Array.isArray(body)) {
       return NextResponse.json(
         { error: "Invalid request body" },
         { status: 400 },
@@ -58,13 +62,12 @@ export async function POST(request: NextRequest) {
     }
 
     // Explicit organization authorization.
-    const { data: membership, error: membershipError } =
-      await supabase
-        .from("organization_members")
-        .select("role")
-        .eq("organization_id", organizationId)
-        .eq("user_id", user.id)
-        .maybeSingle();
+    const { data: membership, error: membershipError } = await supabase
+      .from("organization_members")
+      .select("role")
+      .eq("organization_id", organizationId)
+      .eq("user_id", user.id)
+      .maybeSingle();
 
     if (membershipError) {
       console.error("[Chat API] Membership lookup failed", {
@@ -79,14 +82,12 @@ export async function POST(request: NextRequest) {
 
     if (
       !membership ||
-      (membership.role !== "owner" &&
-        membership.role !== "admin")
+      (membership.role !== "owner" && membership.role !== "admin")
     ) {
-      return NextResponse.json(
-        { error: "Forbidden" },
-        { status: 403 },
-      );
+      return NextResponse.json({ error: "Forbidden" }, { status: 403 });
     }
+
+    const priceFilter = extractPriceFilter(query);
 
     const ragResult = await performVectorSearch(
       {
@@ -94,9 +95,19 @@ export async function POST(request: NextRequest) {
         query: query.trim(),
         top_k: 5,
         similarity_threshold: 0.3,
+        ...(priceFilter ?? {}),
       },
       supabase,
     );
+
+    const useCatalogFallback =
+      ragResult.matches.length === 0 &&
+      priceFilter === null &&
+      isGeneralCatalogQuery(query);
+
+    const productMatches = useCatalogFallback
+      ? await getCatalogFallback(organizationId, supabase)
+      : ragResult.matches;
 
     const prompt = await buildRAGPrompt({
       query: query.trim(),
@@ -105,7 +116,7 @@ export async function POST(request: NextRequest) {
         organization_id: organizationId,
         previous_messages: [],
       },
-      product_matches: ragResult.matches,
+      product_matches: productMatches,
     });
 
     const response = await generateChatResponse({
@@ -118,15 +129,12 @@ export async function POST(request: NextRequest) {
       message: response.message,
       response_id: response.response_id,
       model_used: response.model_used,
-      products: ragResult.matches,
+      products: productMatches,
       retrieval_time_ms: ragResult.total_time_ms,
     });
   } catch (error) {
     console.error("[Chat API] Request failed", error);
 
-    return NextResponse.json(
-      { error: "Chat request failed" },
-      { status: 500 },
-    );
+    return NextResponse.json({ error: "Chat request failed" }, { status: 500 });
   }
 }

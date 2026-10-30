@@ -1,10 +1,8 @@
-
 "use client";
 
 import { useState, type FormEvent } from "react";
 
-const ORGANIZATION_ID =
-  "1eacb95b-8f8e-4f7c-bd32-de4ef92f4257";
+const ORGANIZATION_ID = "1eacb95b-8f8e-4f7c-bd32-de4ef92f4257";
 
 interface Product {
   product_id: string;
@@ -81,9 +79,7 @@ export default function ChatTestPage() {
         id: crypto.randomUUID(),
         role: "assistant",
         content: data.message,
-        products: Array.isArray(data.products)
-          ? data.products
-          : [],
+        products: Array.isArray(data.products) ? data.products : [],
       };
 
       setMessages((previous) => [...previous, assistantMessage]);
@@ -109,10 +105,7 @@ export default function ChatTestPage() {
         </p>
       </header>
 
-      <section
-        aria-label="Chat conversation"
-        className="flex-1 space-y-5"
-      >
+      <section aria-label="Chat conversation" className="flex-1 space-y-5">
         {messages.length === 0 && (
           <div className="rounded-xl border border-dashed p-8 text-center">
             <h2 className="text-lg font-semibold">
@@ -128,9 +121,7 @@ export default function ChatTestPage() {
           <article
             key={message.id}
             className={`flex ${
-              message.role === "user"
-                ? "justify-end"
-                : "justify-start"
+              message.role === "user" ? "justify-end" : "justify-start"
             }`}
           >
             <div
@@ -155,9 +146,7 @@ export default function ChatTestPage() {
                       key={product.product_id}
                       className="rounded-lg border bg-white p-3 text-gray-900"
                     >
-                      <h3 className="font-semibold">
-                        {product.product_name}
-                      </h3>
+                      <h3 className="font-semibold">{product.product_name}</h3>
 
                       {typeof product.product_price === "number" && (
                         <p className="mt-1 font-medium text-indigo-700">
@@ -166,8 +155,9 @@ export default function ChatTestPage() {
                       )}
 
                       <p className="mt-2 text-xs text-gray-500">
-                        Similarity:{" "}
-                        {(product.similarity_score * 100).toFixed(1)}%
+                        {product.similarity_score > 0
+                          ? `Similarity: ${(product.similarity_score * 100).toFixed(1)}%`
+                          : "Catalog product"}
                       </p>
 
                       {product.product_url && (
@@ -196,7 +186,10 @@ export default function ChatTestPage() {
       </section>
 
       {error && (
-        <p role="alert" className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700">
+        <p
+          role="alert"
+          className="mt-4 rounded-lg bg-red-50 p-3 text-sm text-red-700"
+        >
           {error}
         </p>
       )}

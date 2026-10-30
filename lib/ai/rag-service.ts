@@ -1,6 +1,6 @@
 import "server-only";
 
-import { createClient, type SupabaseClient } from "@supabase/supabase-js";
+import type {  SupabaseClient } from "@supabase/supabase-js";
 import { generateEmbedding } from "./embedding-service";
 
 export interface ProductMatch {
@@ -19,6 +19,8 @@ export interface RAGSearchOptions {
   query: string;
   top_k?: number;
   similarity_threshold?: number;
+  max_price?: number;
+  currency?: "USD" | "EUR";
 }
 
 export interface RAGSearchResult {
@@ -72,7 +74,14 @@ export async function performVectorSearch(
   options: RAGSearchOptions,
   supabase: SupabaseClient,
 ): Promise<RAGSearchResult> {
-  const { organization_id, query, top_k = 5, similarity_threshold = 0.3 } = options;
+  const {
+  organization_id,
+  query,
+  top_k = 5,
+  similarity_threshold = 0.3,
+  max_price,
+  currency,
+} = options;
   if (!organization_id.trim() || !query.trim() || query.length > 2000) {
     throw new Error("Invalid organization or query");
   }
@@ -83,16 +92,40 @@ export async function performVectorSearch(
     throw new Error("similarity_threshold must be between 0 and 1");
   }
 
+  if (max_price !== undefined) {
+  if (!Number.isFinite(max_price) || max_price < 0) {
+    throw new Error("max_price must be a non-negative finite number");
+  }
+
+  if (currency !== "USD" && currency !== "EUR") {
+    throw new Error("A supported currency is required with max_price");
+  }
+}
+
   const start = Date.now();
   const embedding = await generateEmbedding(query, organization_id);
   const embeddingTime = Date.now() - start;
   const searchStart = Date.now();
-  const { data, error } = await supabase.rpc("search_products_by_embedding", {
-    p_organization_id: organization_id,
-    p_query_embedding: `[${embedding.join(",")}]`,
-    p_limit: top_k,
-    p_similarity_threshold: similarity_threshold,
-  });
+
+  const rpcParams = {
+  p_organization_id: organization_id,
+  p_query_embedding: `[${embedding.join(",")}]`,
+  p_limit: top_k,
+  p_similarity_threshold: similarity_threshold,
+};
+
+const { data, error } = await supabase.rpc(
+  max_price === undefined
+    ? "search_products_by_embedding"
+    : "search_products_by_embedding_filtered",
+  max_price === undefined
+    ? rpcParams
+    : {
+        ...rpcParams,
+        p_max_price: max_price,
+        p_currency: currency,
+      },
+);
   if (error) {
     throw new Error(`Product retrieval failed: ${error.code ?? "database_error"}`);
   }
