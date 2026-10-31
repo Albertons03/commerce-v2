@@ -1,7 +1,8 @@
 import "server-only";
 
-import type {  SupabaseClient } from "@supabase/supabase-js";
+import type { SupabaseClient } from "@supabase/supabase-js";
 import { generateEmbedding } from "./embedding-service";
+import type { ProductCategory } from "./extract-category-filter";
 
 export interface ProductMatch {
   product_id: string;
@@ -21,6 +22,7 @@ export interface RAGSearchOptions {
   similarity_threshold?: number;
   max_price?: number;
   currency?: "USD" | "EUR";
+  category?: ProductCategory;
 }
 
 export interface RAGSearchResult {
@@ -52,11 +54,21 @@ function parseMatch(value: unknown): ProductMatch {
     product_name: row.product_name,
     similarity_score: row.similarity_score,
   };
-  if (typeof row.product_description === "string") match.product_description = row.product_description;
-  if (typeof row.product_price === "number" && Number.isFinite(row.product_price)) match.product_price = row.product_price;
-  if (typeof row.product_category === "string") match.product_category = row.product_category;
+  if (typeof row.product_description === "string")
+    match.product_description = row.product_description;
+  if (
+    typeof row.product_price === "number" &&
+    Number.isFinite(row.product_price)
+  )
+    match.product_price = row.product_price;
+  if (typeof row.product_category === "string")
+    match.product_category = row.product_category;
   if (typeof row.product_url === "string") match.product_url = row.product_url;
-  if (row.metadata && typeof row.metadata === "object" && !Array.isArray(row.metadata)) {
+  if (
+    row.metadata &&
+    typeof row.metadata === "object" &&
+    !Array.isArray(row.metadata)
+  ) {
     match.metadata = row.metadata as Record<string, unknown>;
   }
   return match;
@@ -75,32 +87,37 @@ export async function performVectorSearch(
   supabase: SupabaseClient,
 ): Promise<RAGSearchResult> {
   const {
-  organization_id,
-  query,
-  top_k = 5,
-  similarity_threshold = 0.3,
-  max_price,
-  currency,
-} = options;
+    organization_id,
+    query,
+    top_k = 5,
+    similarity_threshold = 0.3,
+    max_price,
+    currency,
+    category,
+  } = options;
   if (!organization_id.trim() || !query.trim() || query.length > 2000) {
     throw new Error("Invalid organization or query");
   }
   if (!Number.isInteger(top_k) || top_k < 1 || top_k > 20) {
     throw new Error("top_k must be an integer between 1 and 20");
   }
-  if (!Number.isFinite(similarity_threshold) || similarity_threshold < 0 || similarity_threshold > 1) {
+  if (
+    !Number.isFinite(similarity_threshold) ||
+    similarity_threshold < 0 ||
+    similarity_threshold > 1
+  ) {
     throw new Error("similarity_threshold must be between 0 and 1");
   }
 
   if (max_price !== undefined) {
-  if (!Number.isFinite(max_price) || max_price < 0) {
-    throw new Error("max_price must be a non-negative finite number");
-  }
+    if (!Number.isFinite(max_price) || max_price < 0) {
+      throw new Error("max_price must be a non-negative finite number");
+    }
 
-  if (currency !== "USD" && currency !== "EUR") {
-    throw new Error("A supported currency is required with max_price");
+    if (currency !== "USD" && currency !== "EUR") {
+      throw new Error("A supported currency is required with max_price");
+    }
   }
-}
 
   const start = Date.now();
   const embedding = await generateEmbedding(query, organization_id);
@@ -108,26 +125,41 @@ export async function performVectorSearch(
   const searchStart = Date.now();
 
   const rpcParams = {
-  p_organization_id: organization_id,
-  p_query_embedding: `[${embedding.join(",")}]`,
-  p_limit: top_k,
-  p_similarity_threshold: similarity_threshold,
-};
+    p_organization_id: organization_id,
+    p_query_embedding: `[${embedding.join(",")}]`,
+    p_limit: top_k,
+    p_similarity_threshold: similarity_threshold,
+  };
 
-const { data, error } = await supabase.rpc(
-  max_price === undefined
-    ? "search_products_by_embedding"
-    : "search_products_by_embedding_filtered",
-  max_price === undefined
-    ? rpcParams
-    : {
-        ...rpcParams,
-        p_max_price: max_price,
-        p_currency: currency,
-      },
-);
+  const rpcName =
+    category !== undefined
+      ? "search_products_by_embedding_category"
+      : max_price !== undefined
+        ? "search_products_by_embedding_filtered"
+        : "search_products_by_embedding";
+
+  const rpcArguments =
+    category !== undefined
+      ? {
+          ...rpcParams,
+          p_category: category,
+          p_max_price: max_price ?? null,
+          p_currency: currency ?? null,
+        }
+      : max_price !== undefined
+        ? {
+            ...rpcParams,
+            p_max_price: max_price,
+            p_currency: currency,
+          }
+        : rpcParams;
+
+  const { data, error } = await supabase.rpc(rpcName, rpcArguments);
+
   if (error) {
-    throw new Error(`Product retrieval failed: ${error.code ?? "database_error"}`);
+    throw new Error(
+      `Product retrieval failed: ${error.code ?? "database_error"}`,
+    );
   }
   if (!Array.isArray(data)) {
     throw new Error("Product retrieval returned an invalid response");

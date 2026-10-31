@@ -7,6 +7,7 @@ import { buildRAGPrompt } from "@/lib/ai/prompt-builder";
 import { generateChatResponse } from "@/lib/ai/chat-service";
 import { extractPriceFilter } from "@/lib/ai/extract-price-filter";
 import { getCatalogFallback } from "@/lib/ai/catalog-fallback";
+import { extractCategoryFilter } from "@/lib/ai/extract-category-filter";
 
 function isGeneralCatalogQuery(query: string): boolean {
   const normalized = query.trim().toLowerCase();
@@ -89,6 +90,8 @@ export async function POST(request: NextRequest) {
 
     const priceFilter = extractPriceFilter(query);
 
+    const category = extractCategoryFilter(query);
+
     const ragResult = await performVectorSearch(
       {
         organization_id: organizationId,
@@ -96,6 +99,7 @@ export async function POST(request: NextRequest) {
         top_k: 5,
         similarity_threshold: 0.3,
         ...(priceFilter ?? {}),
+       ...(category !== null ? { category } : {}),
       },
       supabase,
     );
