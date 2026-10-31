@@ -190,3 +190,30 @@ Az adatbázis oszlopaihoz és hosszkorlátaihoz igazodó szabályok a projekt á
 ## Rövid magyarázat állásinterjúhoz
 
 Az API cookie-alapú Supabase-munkamenetből azonosítja a felhasználót, majd ellenőrzi a szervezeti szerepkörét. Csak owner és admin jogosult importálni. Ezután validálja a termékeket, embeddingeket készít és adatbázisba ment; a válaszban a ténylegesen mentett és kihagyott elemek száma is megjelenhet.
+
+
+---
+
+## Current ingestion/demo catalog update (2026-10-31)
+
+> The older three-product and 39-product counts above are historical test observations, not the current catalog.
+
+- Replaced old demo inventory with a clean **32-product** test catalog. The prior demo rows for the selected organization were deliberately deleted before reimport.
+- CSV preview: **32 valid, 0 invalid**. Import: **32 inserted, 0 skipped, 0 failed/unconfirmed**.
+- SQL category check for active products: **Laptops 10; Smartphones 8; Tablets 4; Headphones 3; Smartwatches 3; Accessories 4**. No missing categories in that verified count.
+- The imported CSV used columns `product_id,product_name,product_description,category,price,currency,product_url,product_image_url`; fictional demo pricing is in USD.
+- Existing `POST /api/products/ingest` pipeline, 10-item CSV batches, duplicate accounting, organization checks and Supabase persistence remain in place.
+- These clean categories now support the separate category-aware retrieval SQL RPC, described in `docs/AI_CORE.md` and the project README. Ingestion itself does **not** perform the query-time category filtering.
+
+```mermaid
+flowchart LR
+  CSV["CSV up to 50 rows"] --> Parse["Parse + preview + validation"]
+  Parse --> Batch["Batches of 10"]
+  Batch --> API["POST /api/products/ingest"]
+  API --> Auth["Supabase user + org authorization"]
+  Auth --> Embed["OpenAI 1536D embeddings"]
+  Embed --> Save["product_embeddings via user-scoped client"]
+  Save --> Catalog["Catalog + pgvector retrieval"]
+```
+
+**Release boundary:** Local build passed. Production Auth/cookie behavior, deployed import workflow and SQL migration reproducibility still need verification. Do not commit `.env.local` or any real customer data. The two existing untracked local fixtures are intentionally left untouched.

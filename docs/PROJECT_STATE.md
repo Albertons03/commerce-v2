@@ -147,3 +147,39 @@ made.
    user flow, or a narrowly scoped responsive dashboard layout improvement.
    No ticket has been formally selected yet.
 
+
+
+---
+
+## Current release snapshot — 2026-10-31 (COM-014)
+
+> This section supersedes historical "next task" and "not yet integrated" statements above. Earlier entries remain as a development log, not as a description of current functionality.
+
+**Status:** Local portfolio MVP works; production deployment and public access have **not** been verified.
+
+- Next.js **16.4.2** App Router, TypeScript, Supabase SSR Auth, Postgres/pgvector and OpenAI.
+- Working `POST /api/products/ingest`, CSV upload and catalog, and authenticated `POST /api/chat` with vector retrieval, prompt construction and AI response.
+- Demo catalog: old demo products were intentionally cleared; a replacement CSV imported **32/32** products (0 skipped, 0 unconfirmed). Active categories verified by SQL: Laptops 10, Smartphones 8, Tablets 4, Headphones 3, Smartwatches 3, Accessories 4.
+- **COM-011B** `e403649`: deterministic upper-price extraction, price-filtered vector search RPC and general-catalog fallback; similarity threshold set to 0.3 for the chat route.
+- **COM-012** `e995396`: deterministic category intent extraction; `performVectorSearch` chooses category-aware RPC, optionally combined with USD/EUR upper-price filtering; Chat API passes extracted category. Manual end-to-end query **“Milyen laptopokat ajánlasz programozáshoz 1000 dollár alatt?”** returned five laptop cards, all priced <= $1,000, with matching AI recommendations.
+- **COM-013/1** `3979033`: eight category-extractor unit tests passed; added support for Hungarian inflected `okosórá...` forms. Additional edge-case handling deferred intentionally for portfolio scope.
+- **COM-014/1**: `npm run build` passed on Next.js 16.4.2; routes `/`, `/login`, `/chat-test`, `/api/chat`, `/api/products`, `/api/products/ingest` built successfully. `git status --short` showed only the two pre-existing unrelated untracked files.
+- **COM-014/2**: `.env.local` key names verified (values not disclosed): `NEXT_PUBLIC_SUPABASE_URL`, `NEXT_PUBLIC_SUPABASE_ANON_KEY`, `OPENAI_API_KEY`, `COMMERCE_DEMO_ORGANIZATION_ID`.
+- **COM-014/3**: `lib/supabase/server.ts` imports `createServerClient` from `@supabase/ssr`; production session/cookie handling **not yet audited**.
+
+### Search RPCs — live Supabase state (not yet migration-tracked)
+
+- `search_products_by_embedding` — similarity search, organization and active-product filters.
+- `search_products_by_embedding_filtered` — adds optional maximum price and currency restriction.
+- `search_products_by_embedding_category` — category plus optional price restriction; `SECURITY DEFINER` confirmed true by catalog query. SQL definitions were inspected in Supabase SQL Editor. Full grant/RLS verification and migration-file export are outstanding.
+- All three use organization owner/admin membership checks and limit the returned matches to at most 20, according to the SQL definitions reviewed in chat.
+
+### Release priorities
+
+1. Review and commit updated project docs and a root `README.md`; push **only** intended tracked changes to GitHub.
+2. Confirm Git remote/repository and ensure `.env.local` and secrets are excluded from version control.
+3. Perform focused production Auth/session and environment checks, then deploy to Vercel.
+4. Verify login, catalog, CSV import permissions and `/chat-test` against the deployed app before sharing a public demo link.
+5. Later: version the Supabase RPC SQL in migrations, add RPC-selection regression tests and revisit dependency audit and SSR refresh behavior.
+
+**Do not stage or delete** `lib/products/parse-product-csv.test.mjs` and `test-products.csv` without explicit authorization. Historic `npm audit` findings above are not claimed resolved.

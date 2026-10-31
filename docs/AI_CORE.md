@@ -128,3 +128,38 @@ A négy modul önmagában nem bizonyítja a teljes RAG/termékkeresési UI-integ
 ## Interview explanation
 
 The AI core has four separate modules. One creates the OpenAI client and handles common errors. One prepares text and creates embeddings. One builds prompts from a question, product information, and chat history. The chat module sends messages and returns normal or streaming answers. Keeping these tasks separate makes each part easier to understand and test. The embedding service is now called by the product ingestion API; the chat/RAG integration still needs separate verification.
+
+
+---
+
+## Current end-to-end AI retrieval (2026-10-31)
+
+> This section updates the earlier migration-era statements above. The four original AI core modules remain relevant, but RAG and chat are **now integrated**; earlier notes that the integration is not implemented are historical.
+
+```mermaid
+flowchart LR
+  Q["User question /chat-test"] --> API["POST /api/chat"]
+  API --> Auth["Supabase Auth + org membership"]
+  Auth --> Filters["Price and category extractors"]
+  Filters --> Embed["OpenAI query embedding 1536D"]
+  Embed --> RPC["Supabase pgvector RPC with SQL filters"]
+  RPC --> Matches["Product matches"]
+  Matches --> Prompt["buildRAGPrompt"]
+  Prompt --> Chat["generateChatResponse"]
+  Chat --> UI["AI response + product cards"]
+```
+
+- `lib/ai/rag-service.ts`: `performVectorSearch` generates a query embedding and invokes one of three Supabase RPCs: baseline, price-filtered, or category-aware (which also accepts an optional price limit). Returns product matches and embedding/search timings.
+- `lib/ai/extract-price-filter.ts`: deterministic parsing of supported maximum-price expressions; not a general natural-language currency parser.
+- `lib/ai/extract-category-filter.ts`: deterministic keyword-based mapping to the six demo categories. Single-category, limited inflection and ambiguity coverage by design.
+- `app/api/chat/route.ts`: authenticated user and organization-membership checks, filter extraction, retrieval, prompt building and OpenAI chat generation.
+- `lib/ai/catalog-fallback.ts`: limited general-catalog fallback when there is no semantic match and no price filter, for recognized broad browsing questions. Fallback product cards are identified separately in the test UI.
+- `app/chat-test/page.tsx`: working manual demonstration interface, **not** a production-hardened customer chat widget.
+
+**Observed live test:** “Milyen laptopokat ajánlasz programozáshoz 1000 dollár alatt?” produced five laptop matches priced $649–$999; unrelated tablets and phones were absent. This is one successful integration scenario, not exhaustive coverage.
+
+**Verified checks:** 8/8 category-extractor unit tests; TypeScript and ESLint checks; successful Next.js 16.4.2 production build. SQL RPC definitions exist in live Supabase but are not yet represented by version-controlled migrations. Production deployment and session behavior remain unverified.
+
+### Updated interview explanation
+
+The app embeds product descriptions into a 1536-dimensional vector store. For each user question, the backend checks authorization, extracts supported price and category constraints, embeds the query, and runs a pgvector similarity search with filters applied in SQL. Retrieved product data grounds the OpenAI-generated answer and is also shown as product cards. The architecture separates ingestion, retrieval, prompting and generation.
