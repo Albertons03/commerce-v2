@@ -46,7 +46,7 @@ export function extractCategoryFilter(
     {
       category: "Smartwatches",
       keywords: [
-        "okosóra", "smartwatch",
+        "okosóra", "okosórá", "smartwatch"
       ],
     },
     {
